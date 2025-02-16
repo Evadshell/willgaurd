@@ -1,128 +1,182 @@
-"use client"
-import { useState } from 'react';
-import { prepareContractCall,readContract } from 'thirdweb';
-import { useSendTransaction } from 'thirdweb/react';
-import { createThirdwebClient, getContract, defineChain } from 'thirdweb';
-import axios from 'axios';
+"use client";
+import { useState, useEffect } from "react";
+import {
+  useSendTransaction,
+  useReadContract,
+  useContractEvents,
+} from "thirdweb/react";
+import {
+  createThirdwebClient,
+  defineChain,
+  getContract,
+  prepareContractCall,
+} from "thirdweb";
+import axios from "axios";
+import { toast } from "react-hot-toast";
 
-const pinataApiKey = '8c537f91861c1d7180b3';
-const pinataSecretApiKey = 'e07390cc6ba89fca9cc408858cb9be6f3bc97e9bb3954e1c118c2a1878bab019';
-const pinataEndpoint = 'https://api.pinata.cloud/pinning/pinJSONToIPFS';
+// 1. ThirdWeb Configuration
+const client = createThirdwebClient({
+  clientId: "2bc481f5bc384daebe0b0c185227e1f7",
+});
+const contract = getContract({
+  client,
+  chain: defineChain(11155111),
+  address: "0x8E0D32fBde92A4F40060153DA471Ea3b3b2EBCDb",
+});
 
-const uploadMetadataToIPFS = async (metadata) => {
-  try {
-    const response = await axios.post(
-      pinataEndpoint,
-      metadata,
-      {
-        headers: {
-          pinata_api_key: pinataApiKey,
-          pinata_secret_api_key: pinataSecretApiKey,
-        },
-      }
-    );
-    return response.data.IpfsHash;
-  } catch (error) {
-    console.error('Error uploading to Pinata:', error);
-    throw new Error('Error uploading metadata to IPFS');
-  }
-};
+// 2. Constants
+const PROOF_OF_LIFE_INTERVAL = 20000; // 20 seconds
+const CONTEST_PERIOD = 10000; // 10 seconds
 
 export default function WillManager() {
-    const { mutate: sendTransaction } = useSendTransaction();
-    const client = createThirdwebClient({
-        clientId: '2bc481f5bc384daebe0b0c185227e1f7',
-    });
-    
-    
-  const contract = getContract({
-    client,
-    chain: defineChain(11155111),
-    address: '0xA58C6f72c2C171a99688A27917bF501a0810de8d',
+  const [activeTab, setActiveTab] = useState("create");
+  const [formData, setFormData] = useState({
+    beneficiary: "",
+    name: "",
+    description: "",
+    assetURI: "",
+    tokenId: "",
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [lastProofTimestamp, setLastProofTimestamp] = useState<number | null>(null);
+  
+  const { mutate: sendTransaction } = useSendTransaction();
+
+  const { data: willDetails } = useReadContract({
+    contract,
+    method:
+      "function getWillDetails(uint256 tokenId) view returns ((address beneficiary, uint256 creationDate, uint256 executionDate, bool isExecuted, string assetHash))",
+    params: [BigInt(formData.tokenId)],
   });
 
-  const [tokenURI, setTokenURI] = useState('');
-  const [assetURIs, setAssetURIs] = useState(['']);
-  const [beneficiary, setBeneficiary] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const { data: response } = useReadContract({
+    contract,
+    method:
+      "function getWillDetails(uint256 tokenId) view returns ((address beneficiary, uint256 creationDate, uint256 executionDate, bool isExecuted, string assetHash))",
+    params: [BigInt(formData.tokenId)],
+  });
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        if (response) {
+          setLastProofTimestamp(Number(response.creationDate) * 1000);
+        }
+      } catch (error) {
+        console.error("Error fetching will details:", error);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [formData.tokenId]);
 
-  const onClickExecute = (tokenId) => {
-    const transaction = prepareContractCall({
-      contract,
-      method: 'function executeWill(uint256 tokenId)',
-      params: async () => [BigInt(tokenId)] as const,
-    });
-    sendTransaction(transaction);
+  // Auto-Execute Will if Proof of Life Expires
+  useEffect(() => {
+    if (!lastProofTimestamp) return;
+    const now = Date.now();
+    if (now - lastProofTimestamp > PROOF_OF_LIFE_INTERVAL) {
+      handleExecuteWill();
+    }
+  }, [lastProofTimestamp]);
+
+  // Upload Metadata to IPFS
+  const uploadMetadata = async (metadata) => {
+    try {
+      const response = await axios.post("https://api.pinata.cloud/pinning/pinJSONToIPFS", metadata, {
+        headers: {
+          pinata_api_key: "8c537f91861c1d7180b3",
+          pinata_secret_api_key: "e07390cc6ba89fca9cc408858cb9be6f3bc97e9bb3954e1c118c2a1878bab019",
+        },
+      });
+      return `ipfs://${response.data.IpfsHash}`;
+    } catch (error) {
+      toast.error("IPFS upload failed");
+      throw error;
+    }
   };
 
-  const onClickCreateWill = async () => {
+  // Create Will
+  const handleCreateWill = async () => {
+    setIsLoading(true);
     try {
-      // Create metadata for the token
-      const metadata = createMetadata(name, description, assetURIs[0]);
+      const metadata = {
+        name: formData.name,
+        description: formData.description,
+        image: formData.assetURI,
+        attributes: [{ trait_type: "Category", value: "Digital Will" }],
+      };
+      const tokenURI = await uploadMetadata(metadata);
 
-      // Upload metadata to IPFS
-      const ipfsHash = await uploadMetadataToIPFS(metadata);
-      const tokenURI = `https://ipfs.io/ipfs/${ipfsHash}`;
-
-      // Create the will
       const transaction = prepareContractCall({
         contract,
-        method: 'function createWill(address _beneficiary, string _tokenURI, string[] _assetURIs) returns (uint256)',
-        params: [beneficiary, tokenURI, assetURIs],
+        method: "function createWill(address _beneficiary, string _tokenURI, string _assetHash, address _trustedContact) returns (uint256)",
+        params: [formData.beneficiary, tokenURI, formData.assetURI, "0x0000000000000000000000000000000000000000"],
       });
 
-      sendTransaction(transaction);
+      await sendTransaction(transaction);
+      toast.success("Will created successfully!");
     } catch (error) {
-      console.error('Error creating will:', error);
+      toast.error("Error creating will");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Execute Will (Triggered if inactive)
+  const handleExecuteWill = async () => {
+    try {
+      const transaction = prepareContractCall({
+        contract,
+        method: "function executeWill(uint256 tokenId)",
+        params: [BigInt(formData.tokenId)],
+      });
+      await sendTransaction(transaction);
+      toast.success("Will executed!");
+    } catch (error) {
+      toast.error("Error executing will");
+    }
+  };
+
+  // Provide Proof of Life
+  const handleProofOfLife = async () => {
+    try {
+      const transaction = prepareContractCall({
+        contract,
+        method: "function provideProofOfLife(uint256 tokenId)",
+        params: [BigInt(formData.tokenId)],
+      });
+      await sendTransaction(transaction);
+      setLastProofTimestamp(Date.now());
+      toast.success("Proof of Life updated!");
+    } catch (error) {
+      toast.error("Error updating Proof of Life");
     }
   };
 
   return (
-    <>
-      <h1>Create a Will</h1>
-      <input
-        type="text"
-        placeholder="Beneficiary Address"
-        value={beneficiary}
-        onChange={(e) => setBeneficiary(e.target.value)}
-      />
-      <input
-        type="text"
-        placeholder="Token Name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <input
-        type="text"
-        placeholder="Token Description"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-      />
-      <input
-        type="text"
-        placeholder="Asset URI"
-        value={assetURIs[0]}
-        onChange={(e) => setAssetURIs([e.target.value])}
-      />
-      <button onClick={onClickCreateWill}>Create Will</button>
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl font-bold text-gray-900 mb-8 text-center">🧾 Digital Will Manager</h1>
+        <div className="flex gap-4 mb-8 justify-center">
+          {["create", "manage"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-6 py-2 rounded-lg font-medium ${
+                activeTab === tab ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
 
-      {/* Replace this with a dynamic tokenId when necessary */}
-      <button onClick={() => onClickExecute(0)}>Execute Will (Token ID: 0)</button>
-    </>
+        {activeTab === "create" && (
+          <div className="bg-white p-6 rounded-xl shadow-lg">
+            <h2 className="text-2xl font-semibold mb-6">Create New Will</h2>
+            <input type="text" placeholder="Beneficiary Address" value={formData.beneficiary} onChange={(e) => setFormData({ ...formData, beneficiary: e.target.value })} />
+            <button onClick={handleCreateWill} disabled={isLoading}>Create Digital Will</button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
-
-const createMetadata = (name, description, imageUrl) => {
-  return {
-    name: name,
-    description: description,
-    image: imageUrl,  // Image URL or IPFS URL of the image
-    attributes: [
-      {
-        trait_type: 'Category',
-        value: 'Digital Art',
-      },
-    ],
-  };
-};

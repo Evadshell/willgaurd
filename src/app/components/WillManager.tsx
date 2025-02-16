@@ -22,7 +22,7 @@ const client = createThirdwebClient({
 const contract = getContract({
   client,
   chain: defineChain(11155111),
-  address: "0x8E0D32fBde92A4F40060153DA471Ea3b3b2EBCDb",
+  address: "0x9818d61b9d35B4B250a3377ab79b6fcbb1077ba6",
 });
 
 // 2. Pinata Configuration
@@ -44,7 +44,9 @@ export default function WillManager() {
   const [formData, setFormData] = useState({
     beneficiary: "",
     name: "",
+    assetHash:"",
     description: "",
+    trusted_contact:"",
     assetURI: "",
     tokenId: "",
   });
@@ -91,11 +93,15 @@ export default function WillManager() {
       const transaction = prepareContractCall({
         contract,
         method:
-          "function createWill(address _beneficiary, string _tokenURI, string[] _assetURIs) returns (uint256)",
-        params: [formData.beneficiary, tokenURI, [formData.assetURI]],
+          "function createWill(address _beneficiary, string _tokenURI, string _assetHash, address _trustedContact) returns (uint256)",
+        params: [
+          formData.beneficiary,
+          formData.assetURI,
+          formData.assetHash,
+          formData.trusted_contact,
+        ],
       });
-
-      await sendTransaction(transaction);
+      sendTransaction(transaction);
       toast.success("Will created successfully!");
     } catch (error) {
       toast.error("Error creating will");
@@ -172,6 +178,15 @@ export default function WillManager() {
                   setFormData({ ...formData, beneficiary: e.target.value })
                 }
               />
+               <input
+                type="text"
+                placeholder="Trusted Contact"
+                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={formData.trusted_contact}
+                onChange={(e) =>
+                  setFormData({ ...formData, trusted_contact: e.target.value })
+                }
+              />
               <input
                 type="text"
                 placeholder="Will Name"
@@ -182,11 +197,11 @@ export default function WillManager() {
                 }
               />
               <textarea
-                placeholder="Will Description"
+                placeholder="Hash"
                 className="w-full p-3 border rounded-lg"
-                value={formData.description}
+                value={formData.assetHash}
                 onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
+                  setFormData({ ...formData, assetHash: e.target.value })
                 }
               />
               <input
