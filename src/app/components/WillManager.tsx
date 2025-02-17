@@ -15,6 +15,7 @@ import {
 import axios from "axios";
 import { toast } from "react-hot-toast";
 import { Shield, FileText } from "lucide-react";
+import WillExecuter from "./WillExecuter";
 
 // ThirdWeb Configuration
 const client = createThirdwebClient({
@@ -24,7 +25,7 @@ const client = createThirdwebClient({
 const contract = getContract({
   client,
   chain: defineChain(11155111),
-  address: "0x9818d61b9d35B4B250a3377ab79b6fcbb1077ba6",
+  address: "0x537Fc49d0F22602fBf612369f881bdB20FCb2F19",
 });
 
 // Pinata Configuration
@@ -44,6 +45,7 @@ export default function DigitalWillManager() {
     trusted_contact: "",
     assetURI: "",
     tokenId: "",
+    guardians:[]
   });
   const [isLoading, setIsLoading] = useState(false);
   interface Will {
@@ -99,17 +101,18 @@ export default function DigitalWillManager() {
       const tokenURI = await uploadMetadata(metadata);
 
       const transaction = prepareContractCall({
-        contract,
-        method:
-          "function createWill(address _beneficiary, string _tokenURI, string _assetHash, address _trustedContact) returns (uint256)",
-        params: [
-          formData.beneficiary,
-          formData.assetURI,
-          formData.assetHash,
-          formData.trusted_contact,
-        ],
-      });
-      sendTransaction(transaction);
+      contract,
+      method:
+        "function createWill(uint256 tokenId, address _beneficiary, string _assetHash, bytes32 _encryptedKey, address[] _guardians)",
+      params: [
+        BigInt(formData.tokenId),
+        formData.beneficiary,
+        formData.assetHash,
+        `0x673908350737283FAc952378d824D8C1BA0f3927`,
+        formData.guardians,
+      ],
+    });
+    sendTransaction(transaction);
       toast.success("Will created successfully!");
     } catch (error) {
       toast.error("Error creating will");
@@ -300,6 +303,7 @@ export default function DigitalWillManager() {
                 >
                   <Shield className="mr-2" /> Provide Proof of Life
                 </button>
+                <WillExecuter />
                 {willDetails && (
                   <div className="bg-gray-100 p-4 rounded-lg mt-4">
                     <h3 className="text-lg font-semibold mb-2 text-gray-800">

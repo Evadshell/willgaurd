@@ -1,5 +1,5 @@
 import React from 'react'
-import DigitalWillManager from '../components/WillManager'
+import DigitalWillManager from '../components/WillExecuter'
 
 const page = () => {
   return (
